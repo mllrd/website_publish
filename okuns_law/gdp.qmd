@@ -1,0 +1,234 @@
+---
+title: "Okun's law<br> Закон Оукена для России"
+author: ""
+date: "1/11/2024"
+lang: ru
+format: 
+  html:
+    fig-width: 12
+    fig-height: 8
+    code-fold: true
+---
+::: {.callout-note}
+Воспроизведение из чата [Холодный Расчет](https://t.me/c0ldness), начало [тут](https://t.me/c0ldtalk/20904)
+:::
+>Oleg Kryzhanovskiy:<br>Первые прикидки. Смотрю с 2011 года. В целом, связь явно просматривается (Рис. 1). Так как оба ряда нестационарные, взял первые разности. Соответственно, закон Оукена перевёл тоже к первым разностям. Потенциальные темпы роста сначала взял средние за наблюдаемый период (dY*=1,5 и du*=-0,283). Построил график (РRис. 2). В принципе, уже неплохо бьётся. Задача, насколько я помню, была оценить dY* из безработицы. Поэтому пытаюсь снизить расхождение (MAE) между двумя кривыми, тюня dY* через Поиск решения (Рис. 3). Получается dY*=2,1. Хотя, честно говоря, MAE не сильно снизилось. Ну и напоследок решил потюнить коэффициент Оукена (Рис. 4.), но это уже техническое упражнение, экономики тут нет. Эксельку с расчётами прилагаю, готов к комментариям. Предварительный вывод: оценки роста потенциального ВВП исходя из закона Оукена несколько выше, чем по среднемноголетнему темпу роста (2,1 vs 1,5).
+```{r}
+#| echo: false
+#| label: data
+#| warning: false
+library(tidyverse)
+df <- read_delim('gdp.csv', col_names = c('year', 'GDP', 'UR'), delim=";", locale=locale(decimal_mark = ","))
+df <- df %>% mutate(GDP_growth = GDP - 100,
+                    UR_growth = UR - lag(UR),
+                    period = case_when(
+                        year <= 1998 ~ '1996-1998',
+                        year <= 2008 ~ '1999-2008',
+                        .default = '2009-2022'
+                    )) %>%
+            mutate(GDP_base = cumprod(GDP/100)*100)
+dustar <- mean(df$UR_growth[df$year>2010])
+
+B25 <-2.5
+B15 <-1.5
+
+theme_update(
+    # The default font when not explicitly specified
+    text = element_text(family = "Lobster Two", size = 10, color = "black"),
+    
+    # Customize legend text, position, and background.
+    legend.text = element_text(size = 12, family = "Roboto"),
+    legend.title = element_blank(),
+    legend.position = c(0, 0),
+    legend.justification = c(0, 0),
+    legend.background = element_blank(),
+    # This one removes the background behind each key in the legend
+    legend.key = element_blank(),
+    
+    # Customize title and subtitle font/size/color
+    plot.title = element_text(
+      family = "Lobster Two", 
+      size = 20,
+      face = "bold", 
+      color = "#2a475e"
+    ),
+    plot.subtitle = element_text(
+      family = "Lobster Two", 
+      size = 15, 
+      face = "bold", 
+      color = "#1b2838"
+    ),
+    plot.title.position = "plot",
+    
+    # Adjust axis parameters such as size and color.
+    axis.text = element_text(size = 10, color = "black"),
+    axis.title = element_text(size = 14),
+    axis.ticks = element_blank(),
+    # Axis lines are now lighter than default
+    axis.line = element_line(colour = "grey50"),
+    
+    # Only keep y-axis major grid lines, with a grey color and dashed type.
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(color = "#b4aea9", linetype ="dashed"),
+    
+    # Use a light color for the background of the plot and the panel.
+    panel.background = element_rect(fill = "#fbf9f4", color = "#fbf9f4"),
+    plot.background = element_rect(fill = "#fbf9f4", color = "#fbf9f4"))
+```
+
+
+```{r}
+#| warning: false
+
+df %>% filter(year !=1995) %>% ggplot(aes(x=GDP_growth, y= UR_growth)) + 
+geom_point(aes(color=period, shape= period),
+            size=6,
+            alpha = 0.8) +
+#  geom_smooth(method =lm, se = FALSE) +
+ geom_vline(
+    aes(xintercept = 0), 
+    color = "grey40",
+    linetype = "longdash",
+    size = .8
+  )+
+  geom_hline(
+    aes(yintercept = 0), 
+    color = "grey40",
+    linetype = "longdash",
+    size = .8
+  ) +
+  labs(title = 'Рис. 0. Закон Оукена для России, 1996-2022',
+         x = 'Изменение реального ВВП, % г/г',
+         y = 'Изменение безработицы, п.п., г/г')
+```
+
+```{r}
+#| warning: false
+
+df %>%
+    select(year, GDP_base, UR) %>%
+    pivot_longer(!year, values_to= 'value') %>%
+    mutate(name = case_when(
+                  name == 'GDP_base' ~ 'GDP',
+                  .default = 'Уровень безработицы'
+    )) %>%
+    ggplot(aes(x=year, y=value, group =name, color=name))+ geom_line(linewidth=1.5) +
+    facet_wrap(~name, dir="v", scales="free_y") +
+    theme(legend.position="none", legend.title = element_blank()) +
+    labs(title = 'Рис. 1. Россия: уровни ВВП (1995=100) и безработицы, %', x='', y='')
+```
+
+```{r}
+#| warning: false
+
+df %>% filter(year>2010) %>% mutate(dYstar = mean(GDP_growth),
+                                          dustar = mean(UR_growth),
+                                          'dY-dY*' = GDP_growth - dYstar,
+                                          '(dY-dY*)/dY*' = `dY-dY*`/dYstar,
+                                          'du-du*' = UR_growth - dustar,
+                                          '-b(du-du*)' = -2.5*`du-du*`) %>%
+ filter(year < 2022) %>%
+ select(year, '(dY-dY*)/dY*', '-b(du-du*)') %>%
+ pivot_longer(!year, values_to='value') %>%
+ ggplot(aes(x=year, y= value, group=name, color=name)) +
+ geom_line(linewidth=1.5) +
+ labs(title = 'Рис. 2. Закон Оукена для России',
+      subtitle = 'dY*=1,5; du*=-0,283; β=2,5',
+      x = '',
+      y = '')
+```
+
+```{r}
+#| warning: false
+
+df %>% filter(year>=2010) %>% mutate(GDP = (GDP-100-2.1)/2.1,
+                                     deltaUR = (UR-lag(UR)-dustar)*-B25) %>%
+    filter(year >2010, year<2022) %>%
+    select(year, GDP, deltaUR) %>%
+    pivot_longer(!year, values_to = 'value') %>%
+    mutate(name = case_when(
+                  name == 'GDP' ~ 'ВВП',
+                  .default = 'Уровень безработицы') ) %>%
+    ggplot(aes(x=year, y=value, group = name, color=name)) +
+    geom_line(linewidth=1.5) +
+ labs(title = 'Рис. 3. Закон Оукена для России',
+      subtitle = 'dY*=2,1; du*=-0,283; β=2,5',
+      x = '',
+      y = '')
+```
+>Георгий:<br>
+Получается, если по этой оценке, то в периоды низкого роста ВВП оценка отрицательного разрыва при потенциале 1,5 может быть занижена, а в периоды высокого роста, например, в прошлом 2023 году, наоборот, разрыв завышен.
+
+```{r}
+#| warning: false
+
+df %>% filter(year>=2010) %>% mutate(GDP = (GDP-100-2.1)/2.1,
+                                     deltaUR = (UR-lag(UR)-dustar)*-B15) %>%
+    filter(year >2010, year<2022) %>%
+    select(year, GDP, deltaUR) %>%
+    pivot_longer(!year, values_to = 'value') %>%
+    mutate(name = case_when(
+                  name == 'GDP' ~ 'ВВП',
+                  .default = 'Уровень безработицы') ) %>%
+    ggplot(aes(x=year, y=value, group = name, color=name)) +
+    geom_line(linewidth=1.5) +
+ labs(title = 'Рис. 4. Закон Оукена для России',
+      subtitle = 'dY*=2,1; du*=-0,283; β=1,5',
+      x = '',
+      y = '')
+```
+>Oleg Kryzhanovskiy:<br>Надо смотреть на конкретный год. Мы знаем, что среднее значение за 2011-2021 равно для факта, для потенциального роста 1,5% и потенциального роста 2,1%. Поэтому, скорее всего, в уровнях это будет выглядеть примерно так (для факта 2023 года взята оценка +3,5% г/г) (Рис. 5):
+```{r}
+#| warning: false
+
+df %>% select(year, GDP) %>%
+    add_row(year=2023, GDP=df$GDP[df$year==2022]*1.035) %>%
+    mutate(GDP_base = cumprod(GDP/100)*100) %>%
+    filter(year >= 2010) %>%
+    add_column(GDP15 = (173.48650076548+3.56599810736186)*1.015^c(0:13)) %>%
+    add_column(GDP21 = (173.48650076548-2.76523324988951)*1.021^c(0:13)) %>%
+    select(year, GDP_base, GDP15, GDP21) %>% filter (year>2010) %>%
+    pivot_longer(!year, values_to = "value") %>%
+    mutate(name = case_when(
+                  name == 'GDP_base' ~ 'ВВП',
+                  name == 'GDP15' ~ 'dY*=1.5',
+                  name == 'GDP21' ~ 'dY*=2.1'
+                  ) ) %>%
+    ggplot(aes(x=year, y=value, group=name, color=name)) +
+    geom_line(linewidth=1.5)+
+ theme(
+    legend.position = c(1, 0),
+    legend.justification = c(1, 0)) +
+ labs(title = 'Рис. 5. Россия: факт ВВП (1995=100), возможные уровни ВВП\n (dY*=1,5) и ВВП (dY*=2,1)',
+      x = '',
+      y = '')
+ 
+```
+>Oleg Kryzhanovskiy:<br>
+Из этого уже смотрим разрывы. Да, потенциальные темпы роста 1,5% мне нравятся больше, они логичнее как-то. (Рис. 6).
+```{r}
+#| warning: false
+
+df %>% select(year, GDP_base) %>%
+    add_row(year=2023,
+            GDP_base=df$GDP_base[df$year==2022]*1.035)%>%
+    filter(year >= 2010) %>%
+    add_column(GDP15 = (173.48650076548+3.56599810736186)*1.015^c(0:13)) %>%
+    add_column(GDP21 = (173.48650076548-2.76523324988951)*1.021^c(0:13)) %>%
+    mutate(d_GDP15 = GDP_base - GDP15,
+           d_GDP21 = GDP_base - GDP21) %>%
+    select(year, d_GDP15, d_GDP21) %>% filter (year>2010) %>%
+    pivot_longer(!year, values_to = "value") %>%
+    mutate(name = case_when(
+                  name == 'GDP' ~ 'ВВП',
+                  name == 'd_GDP15' ~ 'dY*=1.5',
+                  name == 'd_GDP21' ~ 'dY*=2.1'
+                  ) ) %>%
+    ggplot(aes(x=year, y=value, group=name, color=name)) +
+    geom_line(linewidth=1.5) +
+ labs(title = 'Рис. 6. Россия: оценки возможных разрывов\n ВВП (dY*=1,5) и ВВП (dY*=2,1)',
+      x = '',
+      y = '')
+ 
+```
